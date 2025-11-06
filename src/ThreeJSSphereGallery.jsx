@@ -138,6 +138,8 @@ const ThreeJSSphereGallery = () => {
   const autoRotationRef = useRef(0);
   const clickStartPosRef = useRef({ x: 0, y: 0 });
   const manualRotationOffsetRef = useRef({ x: 0, y: 0 });
+  const raycasterRef = useRef(null);
+  const mouseVectorRef = useRef(new THREE.Vector2());
   
   const [isInside, setIsInside] = useState(false);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -145,6 +147,11 @@ const ThreeJSSphereGallery = () => {
   const [isLoading, setIsLoading] = useState(true); // Set to true initially
   const loadedImagesRef = useRef(new Set());
   const initialAnimationRef = useRef(true);
+  
+  // Function to detect if device is mobile or tablet
+  const isMobileOrTablet = () => {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+  };
 
   const initScene = useCallback(() => {
     if (!mountRef.current) return;
@@ -164,7 +171,18 @@ const ThreeJSSphereGallery = () => {
     }
 
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(isInside ? 0xe8e8e8 : 0xf5f5f5);
+    // Load background image
+    const backgroundTextureLoader = new THREE.TextureLoader();
+    backgroundTextureLoader.load('/assets/background.jpeg', (texture) => {
+      if (sceneRef.current) {
+        sceneRef.current.background = texture;
+      }
+    }, undefined, (error) => {
+      console.warn('Failed to load background image, using solid color fallback:', error);
+      if (sceneRef.current) {
+        sceneRef.current.background = new THREE.Color(isInside ? 0xe8e8e8 : 0xf5f5f5);
+      }
+    });
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(
@@ -224,8 +242,9 @@ const ThreeJSSphereGallery = () => {
       const highResUrl = project.image;
       
       // Add staggered loading to improve performance
-      // Load first 30 images immediately, then stagger the rest
-      const delay = i < 30 ? 0 : (i - 30) * 10;
+      // When inside the globe, load images faster
+      const immediateLoadCount = isInside ? Math.min(100, mockProjects.length) : 30;
+      const delay = i < immediateLoadCount ? 0 : (i - immediateLoadCount) * (isInside ? 2 : 10);
       
       setTimeout(() => {
         if (!sceneRef.current) return;
@@ -386,7 +405,7 @@ const ThreeJSSphereGallery = () => {
           sceneRef.current.scale.set(1, 1, 1);
         }
         
-        const damping = isInside ? 0.08 : 0.05;
+        const damping = isInside ? 0.05 : 0.03;
         rotationRef.current.x += (targetRotationRef.current.x - rotationRef.current.x) * damping;
         rotationRef.current.y += (targetRotationRef.current.y - rotationRef.current.y) * damping;
 
@@ -407,13 +426,13 @@ const ThreeJSSphereGallery = () => {
           if (initialAnimationRef.current) {
             const elapsed = Date.now() - (window.loadCompleteTime || Date.now());
             if (elapsed < 3000) {
-              autoRotationRef.current += 0.01;
+              autoRotationRef.current += 0.005;
             } else {
               initialAnimationRef.current = false;
-              autoRotationRef.current += 0.002;
+              autoRotationRef.current += 0.001;
             }
           } else {
-            autoRotationRef.current += 0.002;
+            autoRotationRef.current += 0.001;
           }
           targetRotationRef.current.y = autoRotationRef.current + manualRotationOffsetRef.current.y;
         }
@@ -545,10 +564,12 @@ const ThreeJSSphereGallery = () => {
 
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
+    raycasterRef.current = raycaster;
+    mouseVectorRef.current = mouse;
 
     const onMouseMove = (event) => {
-      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      mouseVectorRef.current.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouseVectorRef.current.y = -(event.clientY / window.innerHeight) * 2 + 1;
       
       mouseRef.current = {
         x: event.clientX,
@@ -583,12 +604,12 @@ const ThreeJSSphereGallery = () => {
         if (!isInside) {
           setIsInside(true);
         } else {
-          mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
-          mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+          mouseVectorRef.current.x = (event.clientX / window.innerWidth) * 2 - 1;
+          mouseVectorRef.current.y = -(event.clientY / window.innerHeight) * 2 + 1;
           
-          if (sceneRef.current && cameraRef.current) {
-            raycaster.setFromCamera(mouse, cameraRef.current);
-            const intersects = raycaster.intersectObjects(sceneRef.current.children);
+          if (sceneRef.current && cameraRef.current && raycasterRef.current) {
+            raycasterRef.current.setFromCamera(mouseVectorRef.current, cameraRef.current);
+            const intersects = raycasterRef.current.intersectObjects(sceneRef.current.children);
             
             if (intersects.length > 0) {
               const object = intersects[0].object;
@@ -672,12 +693,157 @@ const ThreeJSSphereGallery = () => {
       }
     };
 
+    // Touch event handlers for mobile
+    const onTouchStart = (event) => {
+      if (event.touches.length === 1) {
+        const touch = event.touches[0];
+        clickStartPosRef.current = { x: touch.clientX, y: touch.clientY };
+        
+        if (isInside) {
+          isManualDraggingRef.current = true;
+          dragStartRef.current = { x: touch.clientX, y: touch.clientY };
+          velocityRef.current = { x: 0, y: 0 };
+        } else {
+          isDraggingRef.current = true;
+          dragStartRef.current = { x: touch.clientX, y: touch.clientY };
+        }
+      }
+    };
+
+    const onTouchMove = (event) => {
+      if (event.touches.length === 1) {
+        event.preventDefault();
+        const touch = event.touches[0];
+        
+        if (isInside && isManualDraggingRef.current) {
+          const deltaX = touch.clientX - dragStartRef.current.x;
+          const deltaY = touch.clientY - dragStartRef.current.y;
+          
+          // Use lower sensitivity for mobile/tablet devices
+          const baseSensitivity = 0.004;
+          const sensitivity = isMobileOrTablet() ? baseSensitivity * 0.5 : baseSensitivity;
+          const rotationDeltaX = deltaY * sensitivity;
+          const rotationDeltaY = deltaX * sensitivity;
+          
+          velocityRef.current.x = rotationDeltaX;
+          velocityRef.current.y = rotationDeltaY;
+          
+          targetRotationRef.current.x += rotationDeltaX;
+          targetRotationRef.current.y += rotationDeltaY;
+          
+          targetRotationRef.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotationRef.current.x));
+          
+          dragStartRef.current = { x: touch.clientX, y: touch.clientY };
+        } else if (isDraggingRef.current && !isInside) {
+          const deltaX = touch.clientX - dragStartRef.current.x;
+          const deltaY = touch.clientY - dragStartRef.current.y;
+          
+          // Use lower sensitivity for mobile/tablet devices
+          const baseSensitivity = 0.0025;
+          const sensitivity = isMobileOrTablet() ? baseSensitivity * 0.5 : baseSensitivity;
+          
+          targetRotationRef.current.y += deltaX * sensitivity;
+          targetRotationRef.current.x += deltaY * sensitivity;
+          
+          dragStartRef.current = { x: touch.clientX, y: touch.clientY };
+        }
+      }
+    };
+
+    const onTouchEnd = (event) => {
+      if (event.changedTouches.length === 1) {
+        const touch = event.changedTouches[0];
+        const deltaX = Math.abs(touch.clientX - clickStartPosRef.current.x);
+        const deltaY = Math.abs(touch.clientY - clickStartPosRef.current.y);
+        
+        if (deltaX < 5 && deltaY < 5) {
+          if (!isInside) {
+            setIsInside(true);
+          } else {
+            mouseVectorRef.current.x = (touch.clientX / window.innerWidth) * 2 - 1;
+            mouseVectorRef.current.y = -(touch.clientY / window.innerHeight) * 2 + 1;
+            
+            if (sceneRef.current && cameraRef.current && raycasterRef.current) {
+              raycasterRef.current.setFromCamera(mouseVectorRef.current, cameraRef.current);
+              const intersects = raycasterRef.current.intersectObjects(sceneRef.current.children);
+              
+              if (intersects.length > 0) {
+                const object = intersects[0].object;
+                if (object.userData && object.userData.project) {
+                  const clickedProject = object.userData.project;
+                  setSelectedProject(clickedProject);
+                  
+                  if (object.userData.isLowRes && object.userData.highResUrl && !object.userData.highResLoaded) {
+                    const correctedHighResUrl = clickedProject.image;
+                    
+                    const loader = new THREE.TextureLoader();
+                    loader.load(correctedHighResUrl, (highResTexture) => {
+                      const canvas = document.createElement('canvas');
+                      const ctx = canvas.getContext('2d');
+                      if (!ctx) return;
+                      
+                      canvas.width = 512;
+                      canvas.height = 512 * 1.4;
+                      
+                      const cornerRadius = 20;
+                      ctx.beginPath();
+                      ctx.moveTo(cornerRadius, 0);
+                      ctx.lineTo(canvas.width - cornerRadius, 0);
+                      ctx.quadraticCurveTo(canvas.width, 0, canvas.width, cornerRadius);
+                      ctx.lineTo(canvas.width, canvas.height - cornerRadius);
+                      ctx.quadraticCurveTo(canvas.width, canvas.height, canvas.width - cornerRadius, canvas.height);
+                      ctx.lineTo(cornerRadius, canvas.height);
+                      ctx.quadraticCurveTo(0, canvas.height, 0, canvas.height - cornerRadius);
+                      ctx.lineTo(0, cornerRadius);
+                      ctx.quadraticCurveTo(0, 0, cornerRadius, 0);
+                      ctx.closePath();
+                      ctx.clip();
+                      
+                      const img = new Image();
+                      img.crossOrigin = 'anonymous';
+                      img.onload = () => {
+                        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                        const roundedTexture = new THREE.CanvasTexture(canvas);
+                        roundedTexture.minFilter = THREE.LinearFilter;
+                        roundedTexture.magFilter = THREE.LinearFilter;
+                        
+                        if ('material' in object && object.material && !Array.isArray(object.material) && object.material.map) {
+                          const oldMap = object.material.map;
+                          object.material.map = roundedTexture;
+                          object.material.needsUpdate = true;
+                          object.userData.isLowRes = false;
+                          object.userData.highResLoaded = true;
+                          if (oldMap) oldMap.dispose();
+                        }
+                      };
+                      img.onerror = () => {
+                        console.warn(`Failed to load high-res image: ${correctedHighResUrl}`);
+                      };
+                      img.src = highResTexture.image.src;
+                    }, undefined, (error) => {
+                      console.warn(`Failed to load high-res texture: ${correctedHighResUrl}`, error);
+                    });
+                  }
+                }
+              }
+            }
+          }
+        }
+        
+        isDraggingRef.current = false;
+        isManualDraggingRef.current = false;
+      }
+    };
+
     if (rendererRef.current) {
       rendererRef.current.domElement.style.cursor = isInside ? 'grab' : 'pointer';
       rendererRef.current.domElement.addEventListener('mousemove', onMouseMove);
       rendererRef.current.domElement.addEventListener('mousedown', onMouseDown);
       rendererRef.current.domElement.addEventListener('mouseup', onMouseUp);
       rendererRef.current.domElement.addEventListener('mouseleave', onMouseLeave);
+      rendererRef.current.domElement.addEventListener('touchstart', onTouchStart, { passive: false });
+      rendererRef.current.domElement.addEventListener('touchmove', onTouchMove, { passive: false });
+      rendererRef.current.domElement.addEventListener('touchend', onTouchEnd);
     }
 
     const handleResize = () => {
@@ -698,6 +864,9 @@ const ThreeJSSphereGallery = () => {
         rendererRef.current.domElement.removeEventListener('mousedown', onMouseDown);
         rendererRef.current.domElement.removeEventListener('mouseup', onMouseUp);
         rendererRef.current.domElement.removeEventListener('mouseleave', onMouseLeave);
+        rendererRef.current.domElement.removeEventListener('touchstart', onTouchStart);
+        rendererRef.current.domElement.removeEventListener('touchmove', onTouchMove);
+        rendererRef.current.domElement.removeEventListener('touchend', onTouchEnd);
       }
       
       if (sceneRef.current) {
@@ -723,11 +892,22 @@ const ThreeJSSphereGallery = () => {
   useEffect(() => {
     const cleanup = initScene();
     return cleanup;
-  }, [initScene]);
+  }, [initScene, isInside]);
 
   useEffect(() => {
     if (cameraRef.current && sceneRef.current) {
-      sceneRef.current.background = new THREE.Color(isInside ? 0xe8e8e8 : 0xf5f5f5);
+      // Load background image
+      const backgroundTextureLoader = new THREE.TextureLoader();
+      backgroundTextureLoader.load('/assets/background.jpeg', (texture) => {
+        if (sceneRef.current) {
+          sceneRef.current.background = texture;
+        }
+      }, undefined, (error) => {
+        console.warn('Failed to load background image, using solid color fallback:', error);
+        if (sceneRef.current) {
+          sceneRef.current.background = new THREE.Color(isInside ? 0xe8e8e8 : 0xf5f5f5);
+        }
+      });
       
       const targetFOV = isInside ? 100 : 75;
       cameraRef.current.fov = targetFOV;
@@ -764,7 +944,9 @@ const ThreeJSSphereGallery = () => {
         const deltaX = e.clientX - dragStartRef.current.x;
         const deltaY = e.clientY - dragStartRef.current.y;
         
-        const sensitivity = 0.008;
+        // Use lower sensitivity for mobile/tablet devices
+        const baseSensitivity = 0.004;
+        const sensitivity = isMobileOrTablet() ? baseSensitivity * 0.5 : baseSensitivity;
         const rotationDeltaX = deltaY * sensitivity;
         const rotationDeltaY = deltaX * sensitivity;
         
@@ -781,8 +963,12 @@ const ThreeJSSphereGallery = () => {
         const deltaX = e.clientX - dragStartRef.current.x;
         const deltaY = e.clientY - dragStartRef.current.y;
         
-        targetRotationRef.current.y += deltaX * 0.005;
-        targetRotationRef.current.x += deltaY * 0.005;
+        // Use lower sensitivity for mobile/tablet devices
+        const baseSensitivity = 0.0025;
+        const sensitivity = isMobileOrTablet() ? baseSensitivity * 0.5 : baseSensitivity;
+        
+        targetRotationRef.current.y += deltaX * sensitivity;
+        targetRotationRef.current.x += deltaY * sensitivity;
         
         dragStartRef.current = { x: e.clientX, y: e.clientY };
       }
@@ -850,7 +1036,7 @@ const ThreeJSSphereGallery = () => {
               console.log('Join Now clicked');
               alert('Join button clicked!');
             }}
-            className="pointer-events-auto w-40 h-40 rounded-full bg-black text-white text-xl font-bold shadow-2xl hover:scale-110 transition-transform duration-300 hover:bg-gray-900"
+            className={`pointer-events-auto rounded-full bg-black text-white font-bold shadow-2xl hover:scale-110 transition-transform duration-300 hover:bg-gray-900 ${isMobileOrTablet() ? 'w-24 h-24 text-lg' : 'w-40 h-40 text-xl'}`}
           >
             Join
           </button>
@@ -864,12 +1050,12 @@ const ThreeJSSphereGallery = () => {
               imageSrc={selectedProject?.image || ''}
               altText={selectedProject?.title || ''}
               captionText=""
-              containerHeight="500px"
-              containerWidth="400px"
-              imageHeight="500px"
-              imageWidth="400px"
+              containerHeight={isMobileOrTablet() ? "300px" : "500px"}
+              containerWidth={isMobileOrTablet() ? "240px" : "400px"}
+              imageHeight={isMobileOrTablet() ? "300px" : "500px"}
+              imageWidth={isMobileOrTablet() ? "240px" : "400px"}
               rotateAmplitude={12}
-              scaleOnHover={1.05}
+              scaleOnHover={isMobileOrTablet() ? 1.02 : 1.05}
               showMobileWarning={false}
               showTooltip={true}
               displayOverlayContent={false}
