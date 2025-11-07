@@ -120,14 +120,14 @@ const ThreeJSSphereGallery = () => {
   };
   
   // Get appropriate sensitivity based on device type
-  const getTouchSensitivity = (isHorizontal = false) => {
+  const getTouchSensitivity = () => {
     const isMobile = isMobileOrTablet();
     if (isInside) {
-      // Inside globe - very low sensitivity for precision
-      return isHorizontal ? (isMobile ? 0.0002 : 0.0003) : (isMobile ? 0.00005 : 0.0001);
+      // Inside globe - moderate sensitivity for good control
+      return isMobile ? 0.003 : 0.005;
     } else {
-      // Outside globe - slightly higher but still controlled
-      return isHorizontal ? (isMobile ? 0.00015 : 0.00025) : (isMobile ? 0.00003 : 0.00008);
+      // Outside globe - similar sensitivity
+      return isMobile ? 0.003 : 0.005;
     }
   };
 
@@ -343,6 +343,11 @@ const ThreeJSSphereGallery = () => {
             velocityRef.current.x = 0;
             velocityRef.current.y = 0;
           }
+          
+          // Add subtle rotation even when there's no user interaction
+          if (velocityRef.current.x === 0 && velocityRef.current.y === 0) {
+            targetRotationRef.current.y += 0.0001; // Subtle continuous rotation as per specification
+          }
         } else if (!isInside && isDraggingRef.current === false) {
           // Apply momentum to outer globe as well
           const isMobile = isMobileOrTablet();
@@ -354,6 +359,11 @@ const ThreeJSSphereGallery = () => {
           if (Math.abs(velocityRef.current.x) < 0.0001 && Math.abs(velocityRef.current.y) < 0.0001) {
             velocityRef.current.x = 0;
             velocityRef.current.y = 0;
+          }
+          
+          // Add subtle rotation even when there's no user interaction
+          if (velocityRef.current.x === 0 && velocityRef.current.y === 0 && !isDraggingRef.current) {
+            targetRotationRef.current.y += 0.00005; // Subtle continuous rotation as per specification
           }
         }
         // Only apply auto-rotation when not manually dragging and when no manual rotation has been applied
@@ -368,20 +378,23 @@ const ThreeJSSphereGallery = () => {
           if (initialAnimationRef.current) {
             const elapsed = Date.now() - (window.loadCompleteTime || Date.now());
             if (elapsed < 3000) {
-              autoRotationRef.current += 0.001;
+              autoRotationRef.current += 0.005; // Further increased for more dynamic initial animation
             } else {
               initialAnimationRef.current = false;
-              autoRotationRef.current += 0.0002;
+              autoRotationRef.current += 0.0012; // Further increased rotation speed
             }
           } else {
-            autoRotationRef.current += 0.0002;
+            autoRotationRef.current += 0.0012; // Further increased rotation speed
           }
           // Apply auto-rotation but preserve manual rotation offset
           targetRotationRef.current.y = autoRotationRef.current + (manualRotationOffsetRef.current.y || 0);
         }
+        // Add subtle continuous rotation when inside the globe for a more dynamic feel
         if (isInside && isManualDraggingRef.current === false && isNavigatingRef.current === false) {
-          autoRotationRef.current += 0.0001;
-          targetRotationRef.current.y += 0.0001;
+          // Add a very subtle rotation to keep the globe gently moving
+          const subtleRotation = 0.0005; // Further increased rotation speed
+          autoRotationRef.current += subtleRotation;
+          targetRotationRef.current.y += subtleRotation;
         }
         sceneRef.current.rotation.x = rotationRef.current.x;
         sceneRef.current.rotation.y = rotationRef.current.y;
@@ -540,16 +553,14 @@ const ThreeJSSphereGallery = () => {
           const amplifiedDeltaY = moveDeltaY * 1.2; // Slightly amplify vertical movement
           
           if (isInside) {
-            const sensitivityX = getTouchSensitivity(true); // Horizontal sensitivity
-            const sensitivityY = getTouchSensitivity(false); // Vertical sensitivity
-            targetRotationRef.current.y += amplifiedDeltaX * sensitivityX;
-            targetRotationRef.current.x += amplifiedDeltaY * sensitivityY;
+            const sensitivity = getTouchSensitivity(); // Sensitivity
+            targetRotationRef.current.y += amplifiedDeltaX * sensitivity;
+            targetRotationRef.current.x += amplifiedDeltaY * sensitivity;
             targetRotationRef.current.x = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, targetRotationRef.current.x));
           } else {
-            const sensitivityX = getTouchSensitivity(true); // Horizontal sensitivity
-            const sensitivityY = getTouchSensitivity(false); // Vertical sensitivity
-            targetRotationRef.current.y += amplifiedDeltaX * sensitivityX;
-            targetRotationRef.current.x += amplifiedDeltaY * sensitivityY;
+            const sensitivity = getTouchSensitivity(); // Sensitivity
+            targetRotationRef.current.y += amplifiedDeltaX * sensitivity;
+            targetRotationRef.current.x += amplifiedDeltaY * sensitivity;
           }
           
           // Apply momentum for smooth rotation continuation
@@ -722,10 +733,9 @@ const ThreeJSSphereGallery = () => {
       if (isNavigatingRef.current && isInside) {
         const deltaX = e.clientX - dragStartRef.current.x;
         const deltaY = e.clientY - dragStartRef.current.y;
-        const sensitivityX = getTouchSensitivity(true); // Horizontal sensitivity
-        const sensitivityY = getTouchSensitivity(false); // Vertical sensitivity
-        const rotationDeltaX = deltaY * sensitivityY;
-        const rotationDeltaY = deltaX * sensitivityX;
+        const sensitivity = getTouchSensitivity(); // Sensitivity
+        const rotationDeltaX = deltaY * sensitivity;
+        const rotationDeltaY = deltaX * sensitivity;
         targetRotationRef.current.x += rotationDeltaX;
         targetRotationRef.current.y += rotationDeltaY;
         rotationRef.current.x += rotationDeltaX;
@@ -736,10 +746,9 @@ const ThreeJSSphereGallery = () => {
       } else if (isManualDraggingRef.current && isInside) {
         const deltaX = e.clientX - dragStartRef.current.x;
         const deltaY = e.clientY - dragStartRef.current.y;
-        const sensitivityX = getTouchSensitivity(true); // Horizontal sensitivity
-        const sensitivityY = getTouchSensitivity(false); // Vertical sensitivity
-        const rotationDeltaX = deltaY * sensitivityY;
-        const rotationDeltaY = deltaX * sensitivityX;
+        const sensitivity = getTouchSensitivity(); // Sensitivity
+        const rotationDeltaX = deltaY * sensitivity;
+        const rotationDeltaY = deltaX * sensitivity;
         velocityRef.current.x = rotationDeltaX;
         velocityRef.current.y = rotationDeltaY;
         targetRotationRef.current.x += rotationDeltaX;
@@ -749,10 +758,9 @@ const ThreeJSSphereGallery = () => {
       } else if (isDraggingRef.current && !isInside) {
         const deltaX = e.clientX - dragStartRef.current.x;
         const deltaY = e.clientY - dragStartRef.current.y;
-        const sensitivityX = getTouchSensitivity(true); // Horizontal sensitivity
-        const sensitivityY = getTouchSensitivity(false); // Vertical sensitivity
-        targetRotationRef.current.y += deltaX * sensitivityX;
-        targetRotationRef.current.x += deltaY * sensitivityY;
+        const sensitivity = getTouchSensitivity(); // Sensitivity
+        targetRotationRef.current.y += deltaX * sensitivity;
+        targetRotationRef.current.x += deltaY * sensitivity;
         dragStartRef.current = { x: e.clientX, y: e.clientY };
       }
     };
